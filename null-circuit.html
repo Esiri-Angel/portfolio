@@ -10,24 +10,25 @@ main{width:min(96vw,1050px)} header{display:flex;align-items:center;justify-cont
 canvas{display:block;width:100%;aspect-ratio:16/9;touch-action:none} .menu{position:absolute;inset:0;display:grid;place-content:center;text-align:center;background:#080913a8;padding:18px}
 .menu[hidden]{display:none} h1{font-size:clamp(32px,8vw,100px);line-height:.9;margin:0;letter-spacing:-.095em;text-transform:uppercase;text-shadow:4px 4px #623aff;color:#f6f9ff}
 p{margin:14px 0 20px;color:#d0dcfa} button{justify-self:center;background:#6cfce0;color:#071820;border:0;padding:13px 27px;border-radius:5px;font:800 14px system-ui;cursor:pointer} button:focus-visible{outline:3px solid white;outline-offset:4px}
-footer{padding:13px 0;color:#a7b5d5;text-align:center;font-size:13px} kbd{font:inherit;color:#eff4ff} #sound{background:none;color:#a7b5d5;padding:3px 0;letter-spacing:inherit;font:inherit}
+footer{padding:13px 0;color:#a7b5d5;text-align:center;font-size:13px} kbd{font:inherit;color:#eff4ff} #practice{margin-top:8px;background:#242d48;color:#e6f2ff} #sound{background:none;color:#a7b5d5;padding:3px 0;letter-spacing:inherit;font:inherit}
 </style>
 <main>
 <header><span>NULL CIRCUIT</span><button id="sound" type="button" aria-pressed="true">SOUND ON</button></header>
 <div class="stage" tabindex="0" aria-label="Null Circuit game arena">
 <canvas width="960" height="540"></canvas>
-<div class="menu"><h1>Null Circuit</h1><p>Dash through enemy fire to send it back.</p><button id="start" type="button">Enter arena</button></div>
+<div class="menu"><h1>Null Circuit</h1><p>Dash through enemy fire to send it back.</p><button id="start" type="button">Enter arena</button><button id="practice" type="button">Practice round</button></div>
 </div>
 <footer><kbd>WASD</kbd> / <kbd>↑ ↓ ← →</kbd> Move &nbsp;·&nbsp; <kbd>Space</kbd> Dash &nbsp;·&nbsp; <kbd>Esc</kbd> Pause<br>Touch: drag to move, tap to dash</footer>
 </main>
 <script>
 const canvas=document.querySelector('canvas'), g=canvas.getContext('2d'), stage=document.querySelector('.stage');
 const menu=document.querySelector('.menu'), start=document.querySelector('#start'), title=menu.querySelector('h1'), desc=menu.querySelector('p'), sound=document.querySelector('#sound');
-const W=960,H=540, keys=new Set();
+const practiceButton=document.querySelector('#practice');
+const W=960,H=540, START_LIVES=5, MAX_LIVES=99, keys=new Set();
 const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
 const near=(a,b,r)=>(a.x-b.x)**2+(a.y-b.y)**2<r*r;
 const aim=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x);
-let paletteIndex=0;
+let paletteIndex=0, practicing=false;
 let state='intro', player={x:480,y:270}, shots=[], enemies=[], dust=[], wave=0, score=0, clock=0, nextWave=0, combo=0, shake=0, flash=0, muted=false, audio, pointer=null, touchOrigin=null, last=0;
 function beep(hz,type='sine',len=.13,volume=.09,end=hz/2){
  if(muted||!audio)return;
@@ -39,28 +40,30 @@ function beep(hz,type='sine',len=.13,volume=.09,end=hz/2){
 function burst(x,y,color,n=12){
  for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=60+Math.random()*240;dust.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,color,life:.25+Math.random()*.4});}
 }
-function begin(){
+function begin(practice=false){
  audio ||= new AudioContext(); audio.resume();
  if(state!=='paused'){
-  player={x:480,y:270,hp:3,dx:1,dy:0,dash:0,cool:0,inv:0};
+  practicing=practice;
+  player={x:480,y:270,hp:START_LIVES,dx:1,dy:0,dash:0,cool:0,inv:0};
   shots=[];enemies=[];dust=[];wave=0;score=0;combo=0;clock=0;nextWave=.65;shake=0;flash=0;paletteIndex=0;
  }
  state='playing';menu.hidden=true;stage.focus();
 }
 function show(mode){
  state=mode;keys.clear();pointer=null;touchOrigin=null;menu.hidden=false;
- title.textContent=mode==='paused'?'Paused':'Circuit Broken';
- desc.textContent=mode==='paused'?'Ready when you are.':`Score ${score.toLocaleString()} · Wave ${wave}`;
- start.textContent=mode==='paused'?'Resume':'One more run';start.focus();
+ practiceButton.hidden=mode==='paused';
+ title.textContent=mode==='paused'?'Paused':mode==='practice-complete'?'Practice cleared':'Circuit Broken';
+ desc.textContent=mode==='paused'?'Ready when you are.':mode==='practice-complete'?'Ready for a scored run?':`Score ${score.toLocaleString()} · Wave ${wave}`;
+ start.textContent=mode==='paused'?'Resume':mode==='practice-complete'?'Start run':'One more run';
+ practiceButton.textContent='Practice again';start.focus();
 }
 function dash(){
  if(state!=='playing'||player.cool>0)return;
  player.dash=.19;player.cool=.87;shake=4;burst(player.x,player.y,'#68fce2',14);beep(190,'sawtooth',.23,.055,65);
 }
 function spawn(){
- if(wave>0)player.hp=Math.min(3,player.hp+1);
  wave++; nextWave=0; flash=.27;beep(196,'triangle',.32,.09,392);
- const count=Math.min(3+wave,12);
+ const count=practicing?2:Math.min(3+wave,12);
  for(let i=0;i<count;i++){
   const a=i/count*Math.PI*2+wave*.64;
   const elite=wave%4===0&&i===0;
@@ -69,7 +72,8 @@ function spawn(){
 }
 function hurt(){
  if(player.inv>0||player.dash>0)return;
- player.hp--;player.inv=1.05;combo=0;shake=13;flash=.3;burst(player.x,player.y,'#ff557f',26);beep(95,'square',.3,.085,46);
+ if(!practicing)player.hp--;
+ player.inv=1.05;combo=0;shake=13;flash=.3;burst(player.x,player.y,'#ff557f',26);beep(95,'square',.3,.085,46);
  if(player.hp<=0)show('lost');
 }
 function reflect(b){
@@ -102,7 +106,7 @@ function update(dt){
   if(e.fire<=0){
    e.fire=Math.max(.65,1.6-wave*.066);
    for(const offset of e.elite?[-.29,0,.29]:[0]){
-    const v=177+Math.min(135,wave*12);
+    const v=practicing?130:177+Math.min(135,wave*12);
     shots.push({x:e.x,y:e.y,vx:Math.cos(a+offset)*v,vy:Math.sin(a+offset)*v,friendly:false});
    }
   }
@@ -125,7 +129,12 @@ function update(dt){
  if(enemies.some(e=>e.elite&&e.hp<=0)){
   paletteIndex=(paletteIndex+1)%backdrops.length;flash=.5;
  }
+ const hadEnemies=enemies.length>0;
  enemies=enemies.filter(e=>e.hp>0);
+ if(state==='playing'&&hadEnemies&&!enemies.length){
+  if(practicing)show('practice-complete');
+  else player.hp=Math.min(MAX_LIVES,player.hp+1);
+ }
  for(const p of dust){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;}
  dust=dust.filter(p=>p.life>0).slice(-600);shake*=Math.pow(.016,dt);flash=Math.max(0,flash-dt);
 }
@@ -158,11 +167,11 @@ function draw(t){
  }
  g.restore();
  if(flash){g.fillStyle=`rgba(201,143,255,${flash*.19})`;g.fillRect(0,0,W,H);}
- g.font='700 19px monospace';g.fillStyle='#e6eeff';g.fillText(`WAVE ${String(wave).padStart(2,'0')}`,35,48);
- g.textAlign='right';g.fillText(score.toLocaleString(),924,48);g.textAlign='left';
+ g.font='700 19px monospace';g.fillStyle='#e6eeff';g.fillText(practicing?'PRACTICE':`WAVE ${String(wave).padStart(2,'0')}`,35,48);
+ g.textAlign='right';g.fillText(practicing?'UNSCORED':score.toLocaleString(),924,48);g.textAlign='left';
  g.font='700 13px monospace';g.fillStyle='#aab8de';g.fillText('DASH',35,H-31);
  g.fillStyle='#303853';g.fillRect(84,H-39,113,7);g.fillStyle='#73fce1';g.fillRect(84,H-39,113*(1-(player.cool||0)/.87),7);
- for(let i=0;i<3;i++)circle(922-i*20,H-35,5,i<(player.hp??3)?'#ff7195':'#35354e');
+ g.textAlign='right';g.fillStyle='#ff8dac';g.fillText(practicing?'NO LIFE LOSS':`LIVES  ${player.hp??START_LIVES} / ${MAX_LIVES}`,925,H-31);g.textAlign='left';
  if(combo>1){g.textAlign='center';g.font='700 17px monospace';g.fillStyle='#8cffdf';g.fillText(`REFLECT ×${combo}`,W/2,49);g.textAlign='left';}
 }
 function frame(ms){const t=ms/1000,dt=last?Math.min(.034,t-last):0;last=t;if(state==='playing')update(dt);draw(t);requestAnimationFrame(frame);}
@@ -180,7 +189,7 @@ canvas.addEventListener('pointermove',e=>{if(touchOrigin&&(pointer||Math.hypot(e
 canvas.addEventListener('pointerup',()=>{if(touchOrigin&&!pointer)dash();pointer=null;touchOrigin=null;});
 canvas.addEventListener('pointercancel',()=>{pointer=null;touchOrigin=null;});
 sound.addEventListener('click',()=>{muted=!muted;sound.textContent=muted?'SOUND OFF':'SOUND ON';sound.setAttribute('aria-pressed',String(!muted));if(state==='playing')stage.focus();});
-start.addEventListener('click',begin);requestAnimationFrame(frame);
+start.addEventListener('click',()=>begin());practiceButton.addEventListener('click',()=>begin(true));requestAnimationFrame(frame);
 </script>
 </html>
 
